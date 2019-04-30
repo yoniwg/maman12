@@ -19,15 +19,15 @@ START_LABEL = '<S>'
 UNKNOWN = ''
 
 
-# SPECIAL_PATTERNS = ['\-?[0-9]+(\.[0-9]+)?',                 # numbers
-#                     '\+?[0-9]+(\-[0-9]+)',                  # phone-numbers
-#                     '[0-9]+([:\.\/\\\]+[0-9]+)+',           # date/time
-#                     '\w+([:@\.\/\\\]+\w+)+',                # internet addresses, emails, etc.
-#                     '[A-Z]+',                               # all-caps words
-#                     '\w+\.',                                # acronyms
-#                     '[\?\!\.]+',                            # characters
-#                     '(\w*\W+)+']                            # other non-words stuff
-
+SPECIAL_PATTERNS = [
+     '\-?[0-9]+(\.[0-9]+)?',                 # numbers
+     '\+?[0-9]+(\-[0-9]+)',                  # phone-numbers
+     '[0-9]+([:\.\/\\\]+[0-9]+)+',           # date/time
+     '\w+([:@\.\/\\\]+\w+)+',                # internet addresses, emails, etc.
+    # '[A-Z][a-z]+([\-\.]?[A-Z][a-z]+)*',     # names-like words
+    # '\w+\.',                               # acronyms
+     '[^A-Za-z0-9]{2,}',                    # characters
+]
 class Submission(SubmissionSpec12):
     def __init__(self):
         self.emission_p = defaultdict(lambda: defaultdict(float))
@@ -45,7 +45,7 @@ class Submission(SubmissionSpec12):
             no_first_capital_sentence = [(self._lower_first(sentence[0][0]), sentence[0][1])] + sentence[1:]
             for word, tag in no_first_capital_sentence:
                 emission_tag_count[tag][0] += 1
-                emission_tag_count[tag][1][word] += 1
+                emission_tag_count[tag][1][self._get_word_or_pattern(word)] += 1
         for tag, data in emission_tag_count.items():
             count, word_dict = data
             word_dict[UNKNOWN] = 0
@@ -53,6 +53,13 @@ class Submission(SubmissionSpec12):
             for word in word_dict:
                 word_prob = (word_dict[word] + DELTA) / count
                 self.emission_p[tag][word] = word_prob
+
+    @staticmethod
+    def _get_word_or_pattern(word):
+        for patt in SPECIAL_PATTERNS:
+            if re.fullmatch(patt, word):
+                return patt
+        return word
 
     def _estimate_transition_probabilites(self, annotated_sentences):
         transition_count = defaultdict(lambda: [0, defaultdict(int)])
@@ -111,7 +118,7 @@ class Submission(SubmissionSpec12):
                 viterbi_table[w_idx][t_idx] = (max_prob[0], emission_p * max_prob[1] * 100)
 
     def _get_emission_prob(self, tag, word):
-        return self.emission_p[tag][word] or self.emission_p[tag][UNKNOWN]
+        return self.emission_p[tag][self._get_word_or_pattern(word)] or self.emission_p[tag][UNKNOWN]
 
     def _compute_backtrace(self, viterbi_table, tag_set):
         backtrace = []

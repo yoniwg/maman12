@@ -14,7 +14,7 @@ def go12():
         build_POS_tagging_data(
             source_treebank_name = "UD_English-EWT",  
             git_hash = "7be629932192bf1ceb35081fb29b8ecb0bd6d767"),
-        passes = 3)
+        passes = 20)
 
 def print_usage():
     print()
