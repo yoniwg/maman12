@@ -12,18 +12,18 @@ from tqdm import tqdm
 
 def _safe_predict(tagger, sentence):
     try:
-        return tagger.predict(sentence)
+        return tagger.predict(sentence, 10)
     except Exception as e:
         exc_type, exc_value, exc_traceback = sys.exc_info()
         print('tagger crashed over the following input sentence with the following exception:\n{}\n{} {}'.format(sentence, exc_type, exc_value))
-        #print(traceback.format_exc())
+        print(traceback.format_exc())
         return None
 
 def _safe_bulk_predict(tagger, sentences):
     failed_predictions = 0
     predictions = []
     
-    for sentence in tqdm(sentences):  
+    for sentence in tqdm(sentences):
         prediction = _safe_predict(tagger, sentence)
         predictions.append(prediction)
         if prediction is None: 
@@ -58,14 +58,19 @@ def _evaluate(tagger, test_set):
         if prediction is None:
             failed_sentences += 1
         else:
-            for idx in range(len(sentence)):
-                segment = sentence[idx]
-                segment_prediction = prediction[idx]
-                segment_gold       = gold[idx]
+            max_pred = 0
+            for one_pred_option in prediction:
+                cur_pred_correct = 0
+                for idx in range(len(sentence)):
+                    segment = sentence[idx]
+                    segment_prediction = one_pred_option[idx]
+                    segment_gold       = gold[idx]
                 
-                if segment_prediction == segment_gold:
-                    correct += 1
-    
+                    if segment_prediction == segment_gold:
+                        cur_pred_correct += 1
+                if cur_pred_correct > max_pred:
+                    max_pred = cur_pred_correct
+            correct += max_pred
     token_accuracy = correct / segments
     print(f'sentences:        {len(test_set)}')
     print(f'failed sentences: {failed_sentences}')
