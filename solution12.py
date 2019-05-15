@@ -24,9 +24,7 @@ SPECIAL_PATTERNS = [
      '\+?[0-9]+(\-[0-9]+)',                  # phone-numbers
      '[0-9]+([:\.\/\\\]+[0-9]+)+',           # date/time
      '\w+([:@\.\/\\\]+\w+)+',                # internet addresses, emails, etc.
-    # '[A-Z][a-z]+([\-\.]?[A-Z][a-z]+)*',     # names-like words
-    # '\w+\.',                               # acronyms
-     '[^A-Za-z0-9]{2,}',                    # characters
+     '[^A-Za-z0-9]{2,}',                     # characters
 ]
 class Submission(SubmissionSpec12):
     def __init__(self):
