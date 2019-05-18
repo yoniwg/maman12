@@ -84,13 +84,13 @@ class Submission(SubmissionSpec12):
         for tags, data in transition_trigram_count.items():
             count, next_tags_dict = data
             for next_tag in next_tags_dict:
-                self.transition_trigram_p[tags][next_tag] = next_tags_dict[next_tag] / count
+                self.transition_trigram_p[tags][next_tag] = (0.9 * next_tags_dict[next_tag] / count +
+                                                             0.1 * self.emission_p[tags[1]][next_tag])
 
     def train(self, annotated_sentences):
         ''' trains the HMM model (computes the probability distributions) '''
 
         print('training function received {} annotated sentences as training data'.format(len(annotated_sentences)))
-        print("TTT training")
         self._estimate_emission_probabilites(annotated_sentences)
         self._estimate_transition_probabilites(annotated_sentences)
 
@@ -98,109 +98,63 @@ class Submission(SubmissionSpec12):
 
     def predict(self, sentence, top_n=1):
         tag_set = 'ADJ ADP PUNCT ADV AUX SYM INTJ CCONJ X NOUN DET PROPN NUM VERB PART PRON SCONJ'.split()
-        viterbi_table = self._init_table(tag_set, sentence, top_n)
-        self._fill_table(viterbi_table, tag_set, sentence, top_n)
-        top_n_prediction = self._compute_backtrace(viterbi_table, tag_set, top_n)
-        ttt = len(sentence)
-        for prediction in top_n_prediction:
-            assert (len(prediction) == len(sentence)), "prediction length is too short"
-        return top_n_prediction
+        viterbi_table = self._init_table(tag_set, sentence)
+        self._fill_table(viterbi_table, tag_set, sentence)
+        prediction = self._compute_backtrace(viterbi_table, tag_set)
+        assert (len(prediction) == len(sentence)), "prediction length is too short"
+        return prediction
 
-    def _init_table(self, tag_set, sentence, top_n, start_label=START_LABEL):
-        initial_table = [[[(-1, -1, 0.0)] * top_n for _ in tag_set] for _ in sentence]
+    def _init_table(self, tag_set, sentence):
+        initial_table = [[[((-1, -1), 0.0) for _ in tag_set] for _ in tag_set] for _ in sentence]
         first_word = self._lower_first(sentence[0])
-        for idx, tag in enumerate(tag_set):
+        for idx1, tag in enumerate(tag_set):
             emission_p = self._get_emission_prob(tag, first_word)
-            transition_p = self.transition_trigram_p[(start_label,start_label)][tag]
-            initial_table[0][idx] = [((-2, -2), (-1, -1), emission_p * transition_p)]
+            transition_p = self.transition_trigram_p[(START_LABEL, START_LABEL)][tag]
+            initial_table[0][0][idx1] = ((-1, -1), emission_p * transition_p * 100)
 
         if len(sentence) > 1:
-            second_word = self._lower_first(sentence[1])
-            for t_idx, tag in enumerate(tag_set):
-                emission_p = self._get_emission_prob(tag, second_word)
-                all_probs = {}
-                for prev_t_idx, cell in enumerate(initial_table[0]):
-                    _, _, prev_prob = cell[0]
-                    transition_p = self.transition_trigram_p[(start_label,tag_set[prev_t_idx])][tag]
-                    all_probs[transition_p * prev_prob] = (prev_t_idx, 0)
-
-                sorted_probs = sorted(all_probs.items(), reverse=True)
-                best_prob_item = sorted_probs[0]
-                best_prob, father = best_prob_item
-                prev_row, prew_colom = father
-                father_cell = initial_table[prew_colom][prev_row]
-                _, _, prev_and_trans_prob = father_cell[0]
-                # We multiply the real value by 100 in order to avoid floating point overflow
-                # This does not change the final result since all the column grows by constant
-                initial_table[1][t_idx] = [((-1, -1), (prev_row, prew_colom), emission_p * prev_and_trans_prob * 100)]
-
+            second_word = sentence[1]
+            for idx1, tag in enumerate(tag_set):
+                for prev_t_idx, prev_tag in enumerate(tag_set):
+                    emission_p = self._get_emission_prob(tag, second_word)
+                    transition_p = self.transition_trigram_p[(START_LABEL, prev_tag)][tag]
+                    _, prev_cell_prob = initial_table[0][0][prev_t_idx]
+                    initial_table[1][prev_t_idx][idx1] = ((0, prev_t_idx), emission_p * transition_p * prev_cell_prob * 100)
         return initial_table
 
-    def _fill_table(self, viterbi_table, tag_set, sentence, top_n):
+    def _fill_table(self, viterbi_table, tag_set, sentence):
         for w_idx, word in enumerate(sentence):
-            if w_idx == 0 or w_idx == 1:
-                prev_word = word
+            if w_idx < 2:
                 continue
             for t_idx, tag in enumerate(tag_set):
                 emission_p = self._get_emission_prob(tag, word)
-                all_probs = {}
-                for prev_prev_t_idx, prev_prev_cell in enumerate(viterbi_table[w_idx - 2]):
-                    _, _, prev_prev_prob = prev_prev_cell[0]
-                    for prev_t_idx, prev_cell in enumerate(viterbi_table[w_idx - 1]):
-                        _, _, prev_prob = prev_cell[0]
-                        transition_p = self.transition_trigram_p[(tag_set[prev_prev_t_idx],tag_set[prev_t_idx])][tag]
-                        prev_emission_p = self._get_emission_prob(tag_set[prev_t_idx], prev_word)
-                        all_probs[transition_p * prev_prev_prob * prev_emission_p] = ((prev_prev_t_idx, w_idx - 2), (prev_t_idx, w_idx - 1))
-                    # We multiply the real value by 100 in order to avoid floating point overflow
-                    # This does not change the final result since all the column grows by constant
-
-                sorted_probs = sorted(all_probs.items(), reverse=True)
-                best_prob_item = sorted_probs[0]
-                best_prob, fathers = best_prob_item
-                grandfather, fathers = fathers
-                # We multiply the real value by 100 in order to avoid floating point overflow
-                # This does not change the final result since all the column grows by constant
-                viterbi_table[w_idx][t_idx] = [(grandfather, fathers, emission_p * best_prob * 100)]
-
-            prev_word = word
+                for prev_t_idx, prev_tag in enumerate(tag_set):
+                    max_prob = 0
+                    max_cell = (-1, -1)
+                    for prev_prev_t_idx, prev_prev_tag in enumerate(tag_set):
+                        relevant_cell, relevant_prob = viterbi_table[w_idx - 1][prev_prev_t_idx][prev_t_idx]
+                        cur_prob = relevant_prob * self.transition_trigram_p[(prev_prev_tag, prev_tag)][tag]
+                        if cur_prob > max_prob:
+                            max_prob = cur_prob
+                            max_cell = (prev_prev_t_idx, prev_t_idx)
+                    viterbi_table[w_idx][prev_t_idx][t_idx] = (max_cell, max_prob * emission_p * 100)
 
     def _get_emission_prob(self, tag, word):
         return self.emission_p[tag][self._get_word_or_pattern(word)] or self.emission_p[tag][UNKNOWN]
 
-    def _compute_backtrace(self, viterbi_table, tag_set, top_n):
-
-        sentense_len = len(viterbi_table)
-        last = viterbi_table[sentense_len-1]
-        int_cell = viterbi_table[sentense_len-1][0]
-        prev_prev_cell, prev_cell, max_prob = int_cell[0]
-        index = 0
-        for prev_t_idx, cell in enumerate(last):
-            tested_prev_prev_cell, tested_prev_cell, tested_max_prob = cell[0]
-            if tested_max_prob > max_prob:
-                index = prev_t_idx
-                max_prob = tested_max_prob
-                prev_prev_cell = tested_prev_prev_cell
-                prev_cell = tested_prev_cell
-
-        backtrace = []
-        backtrace.append(tag_set[index])
-
-        prev_prev_row, prev_prev_colom = prev_prev_cell
-        prev_row, prev_colom = prev_cell
-
-        while prev_prev_row > -1 and prev_prev_colom > -1:
-            backtrace.append(tag_set[prev_row])
-            backtrace.append(tag_set[prev_prev_row])
-            prev_cell = viterbi_table[prev_row][prev_colom]
-
-            tested_cell = viterbi_table[prev_prev_row][prev_prev_colom]
-            prev_prev_cell, prev_cell, max_prob = tested_cell[0]
-            prev_prev_row, prev_prev_colom = prev_prev_cell
-            prev_row, prev_colom = prev_cell
-
-        if prev_row > -1 and prev_colom > -1:
-            backtrace.append(tag_set[prev_row])
-
-        reversed_backtrace = reversed(backtrace)
-
-        return reversed_backtrace
+    def _compute_backtrace(self, viterbi_table, tag_set):
+        backtrace = [None]
+        max_prob = 0
+        cur_elem = None
+        for t_idx, tag in enumerate(tag_set):
+            for prev_t_idx, _ in enumerate(tag_set):
+                prev_cell, cur_prob = viterbi_table[-1][prev_t_idx][t_idx]
+                if cur_prob > max_prob:
+                    max_prob = cur_prob
+                    cur_elem = prev_cell
+                    backtrace[0] = tag_set[t_idx]
+        for col in reversed(viterbi_table[0:-1]):
+            if cur_elem == (-1, -1): break
+            backtrace.insert(0, tag_set[cur_elem[1]])
+            cur_elem, _ = col[cur_elem[0]][cur_elem[1]]
+        return backtrace
